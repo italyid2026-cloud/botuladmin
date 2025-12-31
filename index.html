@@ -1,767 +1,350 @@
-<!DOCTYPE html>
-<html lang="en" class="dark">
+import discord
+from discord import app_commands
+from discord.ext import commands
+import aiohttp
+import datetime
+import json
+import asyncio
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KAZI ADMIN PANEL</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        dark: {
-                            bg: '#0f0f0f',
-                            card: '#191919',
-                            input: '#252525',
-                            border: '#333333'
-                        },
-                        accent: {
-                            cyan: '#00e5ff',
-                            red: '#b40028'
-                        }
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        body {
-            background-color: #0f0f0f;
-            color: #e5e5e5;
-        }
+# --- CONFIGURATION ---
+TOKEN = "MTQyMTUyMDExNzU1NjA1MTk5OA.GlGThv.BNgvFgSJFerorVLTP1kgRNrKmvIMbewUF4Xwuc"
+REQUIRED_ROLE_ID = 1426095150257672223  # User's Role ID
 
-        .scrollbar-hide::-webkit-scrollbar {
-            display: none;
-        }
+# --- THEME & DESIGN ---
+class Theme:
+    SUCCESS = discord.Color(0x57F287)
+    ERROR = discord.Color(0xED4245)
+    INFO = discord.Color(0x5865F2)
+    WARNING = discord.Color(0xFEE75C)
+    DARK = discord.Color(0x2B2D31)
+    
+    ICON_SUCCESS = "✅"
+    ICON_ERROR = "❌"
+    ICON_INFO = "ℹ️"
+    ICON_WARNING = "⚠️"
+    ICON_USER = "👤"
+    ICON_KEY = "🔑"
+    ICON_DB = "🗄️"
+    ICON_TIME = "⏳"
 
-        .glass {
-            background: rgba(25, 25, 25, 0.95);
-            backdrop-filter: blur(10px);
-        }
+# Firebase URLs
+URLS = {
+    'premium': "https://botul-7b0b9-default-rtdb.firebaseio.com/",
+    'bypass': "https://botulbypass-default-rtdb.firebaseio.com/"
+}
 
-        .loader {
-            border-top-color: #00e5ff;
-            -webkit-animation: spinner 1.5s linear infinite;
-            animation: spinner 1.5s linear infinite;
-        }
+# Setup Bot
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-        @keyframes spinner {
-            0% {
-                transform: rotate(0deg);
-            }
+# --- HELPERS ---
 
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-    </style>
-</head>
+def get_db_url(db_alias):
+    db_alias = db_alias.lower()
+    if db_alias in ['p', 'premium']:
+        return URLS['premium'], "Premium"
+    elif db_alias in ['b', 'bypass']:
+        return URLS['bypass'], "Bypass"
+    return None, None
 
-<!-- Login Page Overlay -->
-<div id="loginOverlay" class="fixed inset-0 z-[100] flex items-center justify-center bg-dark-bg p-4 sm:p-6">
-    <div
-        class="bg-dark-card border border-dark-border p-6 sm:p-8 rounded-2xl shadow-2xl w-full max-w-md transform transition-all">
-        <div class="flex flex-col items-center mb-6 sm:mb-8">
-            <div
-                class="w-14 h-14 sm:w-16 sm:h-16 bg-accent-cyan/10 rounded-2xl flex items-center justify-center mb-4 border border-accent-cyan/20">
-                <i class="fa-solid fa-lock text-accent-cyan text-xl sm:text-2xl"></i>
-            </div>
-            <h2 class="text-xl sm:text-2xl font-bold text-white">Admin Access</h2>
-            <p class="text-gray-500 text-xs sm:text-sm">Enter your credentials to continue</p>
-        </div>
+async def firebase_request(method, url, data=None):
+    async with aiohttp.ClientSession() as session:
+        try:
+            if method == "GET":
+                async with session.get(url) as resp:
+                    return await resp.json()
+            elif method == "PUT":
+                async with session.put(url, json=data) as resp:
+                    return await resp.json()
+            elif method == "PATCH":
+                async with session.patch(url, json=data) as resp:
+                    return await resp.json()
+            elif method == "DELETE":
+                async with session.delete(url) as resp:
+                    return resp.status
+        except Exception as e:
+            print(f"Firebase Error: {e}")
+            return None
 
-        <div class="space-y-4">
-            <div>
-                <label
-                    class="block mb-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-400">Username</label>
-                <input type="text" id="adminUser"
-                    class="bg-dark-input border border-dark-border text-white text-sm rounded-xl focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 sm:p-3.5 outline-none placeholder-gray-600 transition-all font-medium"
-                    placeholder="Admin username">
-            </div>
-            <div>
-                <label
-                    class="block mb-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-400">Password</label>
-                <input type="password" id="adminPass"
-                    class="bg-dark-input border border-dark-border text-white text-sm rounded-xl focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 sm:p-3.5 outline-none placeholder-gray-600 transition-all font-medium"
-                    placeholder="••••••••">
-            </div>
-            <button onclick="handleLogin()"
-                class="w-full bg-accent-cyan hover:bg-cyan-400 text-black font-bold py-3.5 sm:py-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 mt-4 sm:mt-6 text-sm sm:text-base">
-                <i class="fa-solid fa-right-to-bracket"></i> Login to Studio
-            </button>
-        </div>
+def create_embed(title, description, color, fields=None, thumbnail=None):
+    embed = discord.Embed(
+        title=title, 
+        description=description, 
+        color=color,
+        timestamp=datetime.datetime.now()
+    )
+    if fields:
+        for name, value, inline in fields:
+            embed.add_field(name=name, value=value, inline=inline)
+    
+    if thumbnail:
+        embed.set_thumbnail(url=thumbnail)
+        
+    embed.set_footer(text="Shorif Admin Panel", icon_url="https://cdn.discordapp.com/embed/avatars/0.png")
+    return embed
 
-        <p id="loginError" class="text-red-500 text-[10px] sm:text-xs text-center mt-4 hidden">Invalid username or
-            password. Please try
-            again.</p>
+# --- CHECKS ---
 
-        <div class="mt-8 sm:mt-10 pt-6 border-t border-dark-border/50 text-center">
-            <p class="text-gray-600 text-[9px] sm:text-[10px] uppercase font-bold tracking-[0.2em]">Developed by <span
-                    class="text-accent-cyan">KAZI ISLAM</span> © 2025</p>
-        </div>
-    </div>
-</div>
+def has_required_role():
+    """Custom check to ensure user has the role (Double verification)."""
+    async def predicate(interaction: discord.Interaction):
+        if isinstance(interaction.user, discord.Member):
+            role = interaction.guild.get_role(REQUIRED_ROLE_ID)
+            if role and role in interaction.user.roles:
+                return True
 
-<!-- Main Dashboard Body (Hidden until login) -->
-<div id="mainDashboard" class="hidden h-screen flex flex-col overflow-hidden font-sans">
+        raise app_commands.MissingRole(REQUIRED_ROLE_ID)
+    return app_commands.check(predicate)
 
-    <!-- Navbar -->
-    <nav
-        class="h-auto min-h-16 flex flex-wrap items-center justify-between px-4 py-2 sm:px-6 border-b border-dark-border bg-dark-card z-20">
-        <div class="flex items-center gap-2 sm:gap-3">
-            <i class="fa-solid fa-user-shield text-accent-cyan text-lg sm:text-xl"></i>
-            <div class="flex items-center gap-2">
-                <h1 class="text-base sm:text-xl font-bold tracking-wide text-accent-cyan truncate">KAZI ADMIN PANEL
-                </h1>
-                <div class="h-4 w-[1px] bg-dark-border hidden sm:block mx-1"></div>
-                <span class="text-[9px] sm:text-[11px] text-gray-500 font-medium whitespace-nowrap">DEVELOPED BY <span
-                        class="text-accent-cyan hover:underline cursor-pointer transition-all"
-                        onclick="openDevModal()">KAZI ISLAM</span></span>
-            </div>
-        </div>
-        <div class="flex items-center gap-2 sm:gap-4 ml-auto">
-            <select id="dbSelector"
-                class="bg-dark-input text-gray-300 text-xs sm:text-sm rounded-lg border border-dark-border block w-24 sm:w-32 p-2 sm:p-2.5 focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan outline-none transition-all">
-                <option value="premium">Premium</option>
-                <option value="bypass">Bypass</option>
-            </select>
-            <button onclick="openAddModal()"
-                class="bg-accent-cyan hover:bg-cyan-400 text-black font-bold py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm transition-all flex items-center gap-1 sm:gap-2">
-                <i class="fa-solid fa-plus text-[10px] sm:text-xs"></i> <span class="hidden xs:inline">Add</span>
-            </button>
-            <button onclick="handleLogout()"
-                class="bg-dark-input hover:bg-gray-700 text-gray-300 font-bold py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm transition-all flex items-center gap-2 border border-dark-border">
-                <i class="fa-solid fa-right-from-bracket"></i>
-            </button>
-            <button onclick="openDevModal()"
-                class="w-10 h-10 flex items-center justify-center rounded-full bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan hover:text-black transition-all">
-                <i class="fa-solid fa-info text-xs"></i>
-            </button>
-        </div>
-    </nav>
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, (app_commands.MissingRole, app_commands.CheckFailure)):
+        embed = create_embed(
+            f"{Theme.ICON_ERROR} Access Denied", 
+            f"You do not have permission to use this bot.\nYour role does not match the required ID.", 
+            Theme.ERROR
+        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        print(f"Error: {error}")
 
-    <!-- Main Content -->
-    <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6 relative">
+# --- SLASH COMMANDS ---
 
-        <!-- Stats & Search -->
-        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mb-6">
-            <div>
-                <h2 class="text-xl sm:text-2xl font-bold text-white mb-1">Dashboard</h2>
-                <p class="text-gray-400 text-xs sm:text-sm">Managing <span id="selectionCount"
-                        class="text-accent-cyan font-bold">0</span> users</p>
-            </div>
-            <div class="relative w-full sm:w-72">
-                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                    <i class="fa-solid fa-search text-gray-500"></i>
-                </div>
-                <input type="text" id="searchInput"
-                    class="bg-dark-input border border-dark-border text-gray-300 text-sm rounded-lg focus:ring-accent-cyan focus:border-accent-cyan block w-full pl-10 p-2.5 outline-none placeholder-gray-500 transition-all"
-                    placeholder="Search users...">
-            </div>
-        </div>
+@bot.event
+async def on_ready():
+    try:
+        synced = await bot.tree.sync()
+        print(f"Success: Synced {len(synced)} commands.")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
+    
+    print(f"Logged in as {bot.user}")
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="User Database"))
 
-        <!-- Grid Container -->
-        <div class="flex-1 overflow-auto relative scrollbar-hide">
-            <div id="loadingSpinner"
-                class="hidden absolute inset-0 bg-dark-card/80 z-10 flex justify-center items-center rounded-xl">
-                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-700 h-10 w-10"></div>
-            </div>
+# Note: We set default_member_permissions to Administrator. 
+# This HIDES the command from everyone else by default.
+# The server admin must go to Server Settings > Integrations > Bot and ADD the Role to allow them to see it.
 
-            <div id="userGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-                <!-- Cards will be populated by JS -->
-            </div>
-        </div>
+@bot.tree.command(name="add", description="Add a new user to the database.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+@app_commands.describe(username="Username", password="Password", days="Days valid")
+async def add_user(interaction: discord.Interaction, database: app_commands.Choice[str], username: str, password: str, days: int):
+    await interaction.response.defer()
+    
+    base_url, db_name = get_db_url(database.value)
+    
+    user_url = f"{base_url}{username}.json"
+    existing = await firebase_request("GET", user_url)
+    if existing:
+        embed = create_embed(f"{Theme.ICON_WARNING} User Exists", f"User **`{username}`** already exists in **{db_name}**.", Theme.WARNING)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-        <!-- Developer Info Footer -->
-        <div
-            class="mt-6 pt-4 border-t border-dark-border flex flex-col sm:flex-row justify-between items-center gap-4 text-gray-500 text-[10px] sm:text-xs">
-            <div class="flex items-center gap-4">
-                <span class="flex items-center gap-1.5"><i class="fa-solid fa-code text-accent-cyan"></i> Developed by
-                    <span class="text-white font-bold">KAZI ISLAM</span></span>
-                <span class="hidden sm:inline-block w-1 h-1 bg-gray-700 rounded-full"></span>
-                <span>Version 2.0.4 (Stable)</span>
-            </div>
-            <div class="flex items-center gap-4">
-                <a href="#" class="hover:text-accent-cyan transition-colors">Documentation</a>
-                <a href="#" class="hover:text-accent-cyan transition-colors">Support</a>
-                <span class="text-gray-600">© 2025 Shorif Systems</span>
-            </div>
-        </div>
-    </main>
+    expiry = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
 
-    <!-- Modal: Add/Edit User -->
-    <div id="userModal" class="hidden fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog"
-        aria-modal="true">
-        <div class="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div class="fixed inset-0 bg-black bg-opacity-75 transition-opacity" onclick="closeModal()"></div>
-            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            <div
-                class="inline-block align-bottom sm:align-middle bg-dark-card rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:max-w-lg w-full border border-dark-border">
-                <div class="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                    <div class="sm:flex sm:items-start">
-                        <div class="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                            <h3 class="text-lg leading-6 font-bold text-white mb-6" id="modalTitle">Add New User</h3>
-
-                            <input type="hidden" id="editOriginalUsername">
-
-                            <div class="grid gap-4 mb-4">
-                                <div>
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Username</label>
-                                    <input type="text" id="inputUsername"
-                                        class="bg-dark-input border border-dark-border text-gray-300 text-sm rounded-lg focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 outline-none transition-all">
-                                </div>
-                                <div>
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Password</label>
-                                    <input type="text" id="inputPassword"
-                                        class="bg-dark-input border border-dark-border text-gray-300 text-sm rounded-lg focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 outline-none transition-all">
-                                </div>
-                                <div>
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Expiry
-                                        Date</label>
-                                    <input type="date" id="inputExpiry"
-                                        class="bg-dark-input border border-dark-border text-gray-300 text-sm rounded-lg focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 outline-none transition-all">
-                                </div>
-                                <div>
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Status</label>
-                                    <select id="inputStatus" onchange="toggleBanReason()"
-                                        class="bg-dark-input border border-dark-border text-gray-300 text-sm rounded-lg focus:ring-accent-cyan focus:border-accent-cyan block w-full p-3 outline-none transition-all">
-                                        <option value="active">Active</option>
-                                        <option value="inactive">Inactive</option>
-                                    </select>
-                                </div>
-                                <div id="banReasonContainer" class="hidden">
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-red-400">Ban
-                                        Reason</label>
-                                    <input type="text" id="inputBanReason" placeholder="Why is this user banned?"
-                                        class="bg-dark-input border border-red-900/50 text-gray-300 text-sm rounded-lg focus:ring-red-500 focus:border-red-500 block w-full p-3 outline-none transition-all">
-                                </div>
-                                <div>
-                                    <label
-                                        class="block mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">HWID</label>
-                                    <div class="flex gap-2">
-                                        <input type="text" id="inputHWID"
-                                            class="bg-dark-input border border-dark-border text-gray-500 text-sm rounded-lg block w-full p-3 outline-none cursor-not-allowed"
-                                            readonly placeholder="System HWID">
-                                        <button type="button" onclick="resetInputHWID()"
-                                            class="bg-dark-input hover:bg-gray-700 border border-dark-border text-white text-xs rounded-lg px-4 transition-colors">Reset</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div
-                    class="bg-dark-input/50 px-4 py-3 sm:px-6 flex flex-col sm:flex-row-reverse gap-2 sm:gap-3 border-t border-dark-border">
-                    <button type="button" onclick="saveUser()"
-                        class="w-full inline-flex justify-center rounded-lg border border-transparent shadow-sm px-4 py-2.5 bg-accent-cyan text-base font-bold text-black hover:bg-cyan-400 focus:outline-none sm:w-auto sm:text-sm transition-all transform active:scale-95">
-                        Save User
-                    </button>
-                    <button type="button" onclick="closeModal()"
-                        class="w-full inline-flex justify-center rounded-lg border border-dark-border shadow-sm px-4 py-2.5 bg-transparent text-base font-medium text-gray-300 hover:text-white hover:bg-gray-800 focus:outline-none sm:w-auto sm:text-sm transition-all">
-                        Cancel
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal: Developer Info -->
-    <div id="devModal" class="hidden fixed inset-0 z-[60] overflow-y-auto" role="dialog" aria-modal="true">
-        <div class="flex items-center justify-center min-h-screen p-4 text-center">
-            <div class="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeDevModal()"></div>
-            <div
-                class="inline-block align-middle bg-dark-card rounded-2xl text-left overflow-hidden shadow-2xl transform transition-all max-w-sm w-full border border-dark-border relative z-10">
-                <div class="relative h-24 bg-gradient-to-r from-accent-cyan to-blue-600">
-                    <button onclick="closeDevModal()" class="absolute top-3 right-3 text-white/50 hover:text-white">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                </div>
-                <div class="px-6 pb-8 text-center -mt-12 relative z-20">
-                    <div class="inline-block p-1 bg-dark-card rounded-full mb-4 shadow-xl">
-                        <div
-                            class="w-20 h-20 bg-dark-input rounded-full flex items-center justify-center border-2 border-accent-cyan">
-                            <i class="fa-solid fa-user-gear text-3xl text-accent-cyan"></i>
-                        </div>
-                    </div>
-                    <h3 class="text-xl font-bold text-white mb-1">KAZI ISLAM</h3>
-                    <p class="text-accent-cyan text-[10px] font-bold uppercase tracking-[0.3em] mb-6">Lead Developer</p>
-
-                    <div class="space-y-4 text-left bg-dark-input/30 p-5 rounded-2xl border border-dark-border mb-6">
-                        <a href="mailto:shorifgameshop78@gmail.com"
-                            class="flex items-center gap-4 group cursor-pointer">
-                            <div
-                                class="w-8 h-8 rounded-lg bg-dark-input flex items-center justify-center border border-dark-border group-hover:border-accent-cyan/50 transition-colors">
-                                <i class="fa-solid fa-envelope text-gray-500 group-hover:text-accent-cyan text-xs"></i>
-                            </div>
-                            <span class="text-gray-300 text-sm font-medium">shorifgameshop78@gmail.com</span>
-                        </a>
-                        <a href="https://t.me/shorifulslam" target="_blank"
-                            class="flex items-center gap-4 group cursor-pointer">
-                            <div
-                                class="w-8 h-8 rounded-lg bg-dark-input flex items-center justify-center border border-dark-border group-hover:border-accent-cyan/50 transition-colors">
-                                <i class="fa-brands fa-telegram text-gray-500 group-hover:text-blue-400 text-xs"></i>
-                            </div>
-                            <span class="text-gray-300 text-sm font-medium">@shorifulslam</span>
-                        </a>
-                        <a href="https://shorifbio.vercel.app/" target="_blank"
-                            class="flex items-center gap-4 group cursor-pointer">
-                            <div
-                                class="w-8 h-8 rounded-lg bg-dark-input flex items-center justify-center border border-dark-border group-hover:border-accent-cyan/50 transition-colors">
-                                <i class="fa-solid fa-globe text-gray-500 group-hover:text-green-400 text-xs"></i>
-                            </div>
-                            <span class="text-gray-300 text-sm font-medium truncate">shorifbio.vercel.app</span>
-                        </a>
-                    </div>
-
-                    <div class="flex justify-center gap-4">
-                        <a href="https://github.com/shorif5778" target="_blank"
-                            class="w-10 h-10 rounded-lg bg-dark-input flex items-center justify-center text-gray-400 hover:text-white hover:bg-accent-cyan transition-all border border-dark-border"><i
-                                class="fa-brands fa-github"></i></a>
-                        <a href="https://discord.gg/Cj2PweAm8t" target="_blank"
-                            class="w-10 h-10 rounded-lg bg-dark-input flex items-center justify-center text-gray-400 hover:text-white hover:bg-[#5865F2] transition-all border border-dark-border"><i
-                                class="fa-brands fa-discord"></i></a>
-                        <a href="https://www.youtube.com/@shorifexe" target="_blank"
-                            class="w-10 h-10 rounded-lg bg-dark-input flex items-center justify-center text-gray-400 hover:text-white hover:bg-red-500 transition-all border border-dark-border"><i
-                                class="fa-brands fa-youtube"></i></a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-</div> <!-- End Main Dashboard -->
-
-<script>
-    const URLS = {
-        'premium': "https://botul-7b0b9-default-rtdb.firebaseio.com/",
-        'bypass': "https://shorif-bypass-default-rtdb.firebaseio.com/users/"
-    };
-
-    let currentDB = 'premium';
-    let usersData = [];
-    let editingUserKey = null;
-
-    // DOM Elements
-    const dbSelector = document.getElementById('dbSelector');
-    const searchInput = document.getElementById('searchInput');
-    const userGrid = document.getElementById('userGrid');
-    const totalUsersLabel = document.getElementById('selectionCount'); // Reusing for total if needed
-    const pageInfo = document.getElementById('pageInfo');
-
-    // Modal Elements
-    const userModal = document.getElementById('userModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const inputUsername = document.getElementById('inputUsername');
-    const inputPassword = document.getElementById('inputPassword');
-    const inputExpiry = document.getElementById('inputExpiry');
-    const inputStatus = document.getElementById('inputStatus');
-    const inputBanReason = document.getElementById('inputBanReason');
-    const inputHWID = document.getElementById('inputHWID');
-    const banReasonContainer = document.getElementById('banReasonContainer');
-
-    // --- Initialization ---
-
-    // --- Authentication ---
-    const ADMIN_CREDENTIALS = { user: "kazi240", pass: "botulpanel1980@@#" };
-
-    window.addEventListener('load', () => {
-        checkSession();
-
-        const today = new Date();
-        today.setDate(today.getDate() + 30);
-        inputExpiry.valueAsDate = today;
-    });
-
-    function checkSession() {
-        const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
-        const loginTimestamp = localStorage.getItem('loginTimestamp');
-        const sessionPass = localStorage.getItem('sessionPass');
-        const loginOverlay = document.getElementById('loginOverlay');
-        const mainDashboard = document.getElementById('mainDashboard');
-
-        // 24 hours in milliseconds
-        const SESSION_TIMEOUT = 24 * 60 * 60 * 1000;
-
-        if (isLoggedIn && loginTimestamp && sessionPass) {
-            // Check if password has been changed
-            if (sessionPass !== btoa(ADMIN_CREDENTIALS.pass)) {
-                handleLogout();
-                return;
-            }
-
-            const currentTime = Date.now();
-            if (currentTime - parseInt(loginTimestamp) > SESSION_TIMEOUT) {
-                handleLogout();
-                return;
-            }
-
-            if (loginOverlay) loginOverlay.style.display = 'none';
-            if (mainDashboard) mainDashboard.classList.remove('hidden');
-            fetchUsers();
-        } else {
-            if (loginOverlay) loginOverlay.style.display = 'flex';
-            if (mainDashboard) mainDashboard.classList.add('hidden');
-        }
+    data = {
+        "username": username,
+        "password": password,
+        "hwid": "",
+        "expiry": expiry,
+        "status": "active",
+        "subscription": "active",
+        "ban_reason": ""
     }
 
-    function handleLogin() {
-        const user = document.getElementById('adminUser').value;
-        const pass = document.getElementById('adminPass').value;
-        const errorMsg = document.getElementById('loginError');
+    await firebase_request("PUT", user_url, data)
+    
+    fields = [
+        (f"{Theme.ICON_USER} Username", f"`{username}`", True),
+        (f"{Theme.ICON_KEY} Password", f"`{password}`", True),
+        (f"{Theme.ICON_TIME} Expiry", f"`{expiry}`", True),
+        (f"{Theme.ICON_DB} Database", f"**{db_name}**", True)
+    ]
+    
+    embed = create_embed(f"{Theme.ICON_SUCCESS} User Created", "User successfully added.", Theme.SUCCESS, fields)
+    await interaction.followup.send(embed=embed)
 
-        if (user === ADMIN_CREDENTIALS.user && pass === ADMIN_CREDENTIALS.pass) {
-            localStorage.setItem('isLoggedIn', 'true');
-            localStorage.setItem('loginTimestamp', Date.now().toString());
-            // Store a simple hash (base64) of the password to check for changes
-            localStorage.setItem('sessionPass', btoa(ADMIN_CREDENTIALS.pass));
-            checkSession();
-        } else {
-            if (errorMsg) {
-                errorMsg.classList.remove('hidden');
-                setTimeout(() => errorMsg.classList.add('hidden'), 3000);
-            }
-        }
-    }
+@bot.tree.command(name="del", description="Delete a user.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def delete_user(interaction: discord.Interaction, database: app_commands.Choice[str], username: str):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-    function handleLogout() {
-        localStorage.removeItem('isLoggedIn');
-        localStorage.removeItem('loginTimestamp');
-        localStorage.removeItem('sessionPass');
-        location.reload();
-    }
+    user_url = f"{base_url}{username}.json"
+    existing = await firebase_request("GET", user_url)
+    if not existing:
+        embed = create_embed(f"{Theme.ICON_ERROR} Not Found", f"User **`{username}`** not found.", Theme.ERROR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-    if (dbSelector) {
-        dbSelector.addEventListener('change', (e) => {
-            currentDB = e.target.value;
-            fetchUsers();
-        });
-    }
+    await firebase_request("DELETE", user_url)
+    embed = create_embed(f"{Theme.ICON_SUCCESS} Deleted", f"User **`{username}`** deleted.", Theme.SUCCESS)
+    await interaction.followup.send(embed=embed)
 
-    if (searchInput) {
-        searchInput.addEventListener('input', renderCards);
-    }
+@bot.tree.command(name="info", description="Get user info.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def user_info(interaction: discord.Interaction, database: app_commands.Choice[str], username: str):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-    // --- Functions ---
+    user_url = f"{base_url}{username}.json"
+    data = await firebase_request("GET", user_url)
+    
+    if not data:
+        embed = create_embed(f"{Theme.ICON_ERROR} Not Found", f"User **`{username}`** not found.", Theme.ERROR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-    async function fetchUsers() {
-        if (userGrid) userGrid.innerHTML = '<div class="col-span-full text-center text-gray-600 py-10">Loading users...</div>';
+    status = data.get("status", "unknown").upper()
+    color = Theme.INFO
+    status_icon = "🟢"
+    if status == "INACTIVE":
+        color = Theme.ERROR
+        status_icon = "🔴"
+    
+    fields = [
+        ("Username", f"`{username}`", True),
+        ("Password", f"||`{data.get('password', 'N/A')}`||", True),
+        ("Status", f"{status_icon} **{status}**", True),
+        ("Expiry", f"`{data.get('expiry', 'N/A')}`", True),
+        ("Database", f"**{db_name}**", True),
+        ("HWID", f"```yaml\n{data.get('hwid') or 'Not Set'}\n```", False)
+    ]
+    
+    embed = create_embed(f"{Theme.ICON_USER} User Profile", f"Details for **{username}**", color, fields)
+    await interaction.followup.send(embed=embed)
 
-        const url = URLS[currentDB] + ".json";
+@bot.tree.command(name="reset", description="Reset HWID.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def reset_hwid(interaction: discord.Interaction, database: app_commands.Choice[str], username: str):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
+    user_url = f"{base_url}{username}.json"
+    existing = await firebase_request("GET", user_url)
+    if not existing:
+        embed = create_embed(f"{Theme.ICON_ERROR} Not Found", f"User **`{username}`** not found.", Theme.ERROR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-            usersData = [];
-            if (data) {
-                if (Array.isArray(data)) {
-                    data.forEach(u => { if (u) usersData.push(u); });
-                } else {
-                    for (const key in data) {
-                        const user = data[key];
-                        if (!user.username) user.username = key;
-                        usersData.push(user);
-                    }
-                }
-            }
-            renderCards();
-        } catch (error) {
-            console.error("Error fetching users:", error);
-            if (userGrid) userGrid.innerHTML = '<div class="col-span-full text-center text-red-500 py-10">Failed to load data.</div>';
-        }
-    }
+    await firebase_request("PATCH", user_url, {"hwid": ""})
+    embed = create_embed(f"{Theme.ICON_SUCCESS} HWID Reset", f"HWID for **`{username}`** reset.", Theme.SUCCESS)
+    await interaction.followup.send(embed=embed)
 
-    function renderCards() {
-        if (!userGrid) return;
-        userGrid.innerHTML = '';
-        const query = searchInput.value.toLowerCase();
+@bot.tree.command(name="ban", description="Ban a user.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def ban_user(interaction: discord.Interaction, database: app_commands.Choice[str], username: str, reason: str = "Banned by Admin"):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-        const filteredUsers = usersData.filter(user => {
-            return (user.username || '').toLowerCase().includes(query);
-        });
+    user_url = f"{base_url}{username}.json"
+    existing = await firebase_request("GET", user_url)
+    if not existing:
+        embed = create_embed(f"{Theme.ICON_ERROR} Not Found", f"User **`{username}`** not found.", Theme.ERROR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-        if (totalUsersLabel) {
-            totalUsersLabel.textContent = `${filteredUsers.length} Users Found`;
-            totalUsersLabel.classList.remove('hidden');
-        }
+    await firebase_request("PATCH", user_url, {"status": "inactive", "subscription": "inactive", "ban_reason": reason})
+    embed = create_embed(f"🚫 User Banned", f"**`{username}`** banned.\nReason: {reason}", Theme.ERROR)
+    await interaction.followup.send(embed=embed)
 
-        if (filteredUsers.length === 0) {
-            userGrid.innerHTML = `<div class="col-span-full text-center text-gray-500 py-10">No users match your search.</div>`;
-            return;
-        }
+@bot.tree.command(name="unban", description="Unban a user.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def unban_user(interaction: discord.Interaction, database: app_commands.Choice[str], username: str):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-        filteredUsers.forEach(user => {
-            const isInactive = (user.status || 'active').toLowerCase() === 'inactive';
-            const banReason = user.ban_reason || 'No reason';
+    user_url = f"{base_url}{username}.json"
+    existing = await firebase_request("GET", user_url)
+    if not existing:
+        embed = create_embed(f"{Theme.ICON_ERROR} Not Found", f"User **`{username}`** not found.", Theme.ERROR)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        return
 
-            const card = document.createElement('div');
-            card.className = "bg-dark-card border border-dark-border rounded-xl p-4 sm:p-5 relative hover:border-accent-cyan/30 transition-all group shadow-lg";
+    await firebase_request("PATCH", user_url, {"status": "active", "subscription": "active", "ban_reason": ""})
+    embed = create_embed(f"{Theme.ICON_SUCCESS} User Unbanned", f"**`{username}`** unbanned.", Theme.SUCCESS)
+    await interaction.followup.send(embed=embed)
 
-            // Status Badge
-            const statusClass = isInactive ? "text-red-500 bg-red-900/10 border-red-900/30" : "text-green-500 bg-green-900/10 border-green-900/30";
-            const statusText = isInactive ? "Banned" : "Active";
+@bot.tree.command(name="list", description="List users.")
+@app_commands.default_permissions(administrator=True)
+@has_required_role()
+@app_commands.choices(database=[
+    app_commands.Choice(name="Premium", value="premium"),
+    app_commands.Choice(name="Bypass", value="bypass")
+])
+async def list_users(interaction: discord.Interaction, database: app_commands.Choice[str], search: str = None):
+    await interaction.response.defer()
+    base_url, db_name = get_db_url(database.value)
 
-            card.innerHTML = `
-            <!-- Top Row: Username & Status -->
-            <div class="flex justify-between items-start mb-4 sm:mb-6">
-                <div class="flex items-center gap-2 sm:gap-3">
-                    <input type="checkbox" class="w-4 h-4 bg-dark-input border-dark-border rounded focus:ring-0 accent-accent-cyan">
-                    <h3 class="font-bold text-white text-base sm:text-lg truncate max-w-[120px] sm:max-w-none">${user.username}</h3>
-                </div>
-                <div class="flex items-center gap-2 sm:gap-3">
-                    <span class="text-[9px] sm:text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${statusClass}">${statusText}</span>
-                    <button onclick="toggleMenu(event, '${user.username}')" class="text-gray-500 hover:text-white transition-colors p-1">
-                        <i class="fa-solid fa-ellipsis-vertical"></i>
-                    </button>
-                </div>
-            </div>
+    data = await firebase_request("GET", base_url + ".json")
+    if not data:
+        embed = create_embed(f"{Theme.ICON_WARNING} Empty", "No users found.", Theme.WARNING)
+        await interaction.followup.send(embed=embed)
+        return
 
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-2 gap-y-3 sm:gap-y-4 text-[10px] sm:text-[11px]">
-                <div>
-                     <p class="text-gray-500 uppercase font-bold mb-0.5 tracking-tight">Expiry</p>
-                     <p class="text-gray-300 font-medium">${formatDate(user.expiry)}</p>
-                </div>
-                <div class="text-right">
-                     <p class="text-gray-500 uppercase font-bold mb-0.5 tracking-tight">Password</p>
-                     <p class="text-gray-300 font-mono">${user.password || 'N/A'}</p>
-                </div>
-                <div>
-                     <p class="text-gray-500 uppercase font-bold mb-0.5 tracking-tight">HWID</p>
-                     <p class="${user.hwid ? 'text-accent-cyan' : 'text-gray-600'} font-bold">${user.hwid ? 'Bound' : 'Free'}</p>
-                </div>
-                <div class="text-right">
-                     <p class="text-gray-500 uppercase font-bold mb-0.5 tracking-tight">Access</p>
-                     <p class="text-gray-300">${currentDB.toUpperCase()}</p>
-                </div>
-            </div>
+    users = []
+    if isinstance(data, list):
+        for item in data:
+            if item: users.append(item)
+    else:
+        for key, val in data.items():
+            val['username'] = key
+            users.append(val)
 
-            ${isInactive ? `<div class="mt-4 pt-3 border-t border-red-900/20 text-[10px] text-red-400/80 italic line-clamp-1">Reason: ${banReason}</div>` : ''}
-        `;
-            userGrid.appendChild(card);
-        });
-    }
+    if search:
+        users = [u for u in users if search.lower() in u.get('username', '').lower()]
 
-    // --- CRUD Operations ---
+    if not users:
+        embed = create_embed("🔍 No Matches", f"No users found matching **`{search}`**.", Theme.WARNING)
+        await interaction.followup.send(embed=embed)
+        return
 
-    function openAddModal() {
-        editingUserKey = null;
-        modalTitle.textContent = "New User Registration";
+    desc_lines = []
+    for i, u in enumerate(users[:20], 1):
+        name = u.get('username', 'Unknown')
+        status = u.get('status', 'active').lower()
+        icon = "🟢" if status == 'active' else "🔴"
+        style = f"**`{name}`**" if status == 'active' else f"~~`{name}`~~"
+        desc_lines.append(f"`{i:02d}.` {icon} {style}")
 
-        inputUsername.value = '';
-        inputUsername.disabled = false;
-        inputPassword.value = '';
-        inputStatus.value = 'active';
-        inputBanReason.value = '';
-        inputHWID.value = '';
+    total = len(users)
+    desc = "\n".join(desc_lines)
+    if total > 20: desc += f"\n...and {total - 20} more users."
 
-        const d = new Date();
-        d.setDate(d.getDate() + 30);
-        if (inputExpiry) inputExpiry.value = d.toISOString().split('T')[0];
+    embed = create_embed(f"{Theme.ICON_DB} User List ({total})", desc, Theme.INFO)
+    await interaction.followup.send(embed=embed)
 
-        toggleBanReason();
-        userModal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden'; // Prevent scroll
-    }
-
-    function openEditModal(username) {
-        const user = usersData.find(u => u.username === username);
-        if (!user) return;
-
-        editingUserKey = username;
-        modalTitle.textContent = "Modify User: " + username;
-
-        inputUsername.value = user.username;
-        inputUsername.disabled = true;
-
-        inputPassword.value = user.password || '';
-
-        const parsed = new Date(user.expiry);
-        if (!isNaN(parsed)) {
-            inputExpiry.value = parsed.toISOString().split('T')[0];
-        }
-
-        inputStatus.value = (user.status || 'active').toLowerCase();
-        inputBanReason.value = user.ban_reason || '';
-        inputHWID.value = user.hwid || '';
-
-        toggleBanReason();
-        userModal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden'; // Prevent scroll
-    }
-
-    function closeModal() {
-        userModal.classList.add('hidden');
-        document.body.style.overflow = 'auto'; // Re-enable scroll
-    }
-
-    async function saveUser() {
-        const username = inputUsername.value.trim();
-        const password = inputPassword.value.trim();
-        const expiry = inputExpiry.value;
-        const status = inputStatus.value;
-        const banReason = inputBanReason.value.trim();
-        const hwid = inputHWID.value.trim();
-
-        if (!username || !password) {
-            alert("Username and Password are required!");
-            return;
-        }
-
-        closeModal();
-
-        const userData = {
-            username: username,
-            password: password,
-            expiry: expiry,
-            status: status,
-            subscription: status,
-            ban_reason: banReason,
-            hwid: hwid
-        };
-
-        const url = `${URLS[currentDB]}${username}.json`;
-        const method = editingUserKey ? 'PATCH' : 'PUT';
-
-        try {
-            await fetch(url, {
-                method: method,
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(userData)
-            });
-            await fetchUsers();
-        } catch (e) {
-            alert("Error saving: " + e);
-        }
-    }
-
-    async function deleteUser(username) {
-        if (!confirm(`Delete user ${username}?`)) return;
-
-        const url = `${URLS[currentDB]}${username}.json`;
-
-        try {
-            await fetch(url, { method: 'DELETE' });
-            await fetchUsers();
-        } catch (e) {
-            alert("Error deleting: " + e);
-        }
-    }
-
-    async function resetUserHWID(username) {
-        if (!confirm(`Reset HWID for user ${username}?`)) return;
-
-        const url = `${URLS[currentDB]}${username}.json`;
-
-        try {
-            await fetch(url, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hwid: "" })
-            });
-            await fetchUsers();
-        } catch (e) {
-            alert("Error resetting HWID: " + e);
-        }
-    }
-
-    function resetInputHWID() {
-        inputHWID.value = '';
-    }
-
-    function toggleBanReason() {
-        if (inputStatus.value === 'inactive') {
-            banReasonContainer.classList.remove('hidden');
-        } else {
-            banReasonContainer.classList.add('hidden');
-        }
-    }
-
-    function formatDate(dateStr) {
-        if (!dateStr) return "N/A";
-        const d = new Date(dateStr);
-        if (isNaN(d)) return dateStr;
-        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    }
-
-    function toggleMenu(e, username) {
-        e.stopPropagation();
-
-        // Remove any existing menus
-        const existingMenu = document.getElementById('activeMenu');
-        if (existingMenu) {
-            const sameUser = existingMenu.getAttribute('data-user') === username;
-            existingMenu.remove();
-            if (sameUser) return; // Just closed it
-        }
-
-        const menu = document.createElement('div');
-        menu.id = 'activeMenu';
-        menu.setAttribute('data-user', username);
-        // Using fixed positioning for better mobile support
-        menu.className = "fixed w-40 bg-dark-card border border-dark-border rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] z-[100] overflow-hidden";
-
-        // Position menu near the button
-        const rect = e.currentTarget.getBoundingClientRect();
-
-        // Ensure menu doesn't go off screen
-        let top = rect.bottom + 8;
-        let left = rect.right - 160; // 160 is menu width
-
-        if (left < 10) left = 10;
-        if (top + 150 > window.innerHeight) top = rect.top - 158;
-
-        menu.style.top = top + "px";
-        menu.style.left = left + "px";
-
-        menu.innerHTML = `
-        <button onclick="openEditModal('${username}'); document.getElementById('activeMenu').remove();" class="w-full text-left px-4 py-3 text-xs font-semibold text-gray-300 hover:bg-dark-input hover:text-accent-cyan transition-colors flex items-center gap-3">
-            <i class="fa-solid fa-pen-to-square text-sm opacity-70"></i> Edit User
-        </button>
-        <button onclick="resetUserHWID('${username}'); document.getElementById('activeMenu').remove();" class="w-full text-left px-4 py-3 text-xs font-semibold text-yellow-500/80 hover:bg-yellow-900/10 transition-colors flex items-center gap-3">
-            <i class="fa-solid fa-arrows-rotate text-sm opacity-70"></i> Reset HWID
-        </button>
-        <div class="h-[1px] bg-dark-border mx-2"></div>
-        <button onclick="deleteUser('${username}'); document.getElementById('activeMenu').remove();" class="w-full text-left px-4 py-3 text-xs font-semibold text-red-500/80 hover:bg-red-900/10 transition-colors flex items-center gap-3">
-            <i class="fa-solid fa-trash text-sm opacity-70"></i> Delete User
-        </button>
-    `;
-
-        document.body.appendChild(menu);
-    }
-
-    // Close menu when clicking elsewhere
-    document.addEventListener('click', () => {
-        const menu = document.getElementById('activeMenu');
-        if (menu) menu.remove();
-    });
-
-    function openDevModal() {
-        document.getElementById('devModal').classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-    }
-
-    function closeDevModal() {
-        document.getElementById('devModal').classList.add('hidden');
-        document.body.style.overflow = 'auto';
-    }
-</script>
-</body>
-
-</html>
+if __name__ == "__main__":
+    bot.run(TOKEN)
